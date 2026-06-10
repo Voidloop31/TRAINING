@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dead Man's Switch</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #0f0f0f; color: #e0e0e0; padding: 20px; }
+    h1 { text-align: center; color: #00ffcc; margin-bottom: 30px; font-size: 2rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .panel { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 20px; }
+    .panel h2 { color: #00ffcc; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+    button { background: #00ffcc; color: #0f0f0f; border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; }
+    button:hover { background: #00ccaa; }
+    button:disabled { background: #444; color: #888; cursor: not-allowed; }
+    input { width: 100%; padding: 10px; margin-top: 8px; border-radius: 8px; border: 1px solid #444; background: #111; color: #fff; }
+    .status { padding: 8px 14px; border-radius: 20px; display: inline-block; font-weight: bold; margin: 10px 0; }
+    .Active { background: #003322; color: #00ffcc; }
+    .GracePeriod { background: #332200; color: #ffaa00; }
+    .Triggered { background: #330000; color: #ff4444; }
+    .Cancelled { background: #222; color: #aaa; }
+    .info { font-size: 0.85rem; color: #aaa; margin-top: 6px; }
+    .timer { font-size: 1.4rem; color: #ffaa00; font-weight: bold; margin: 10px 0; }
+    #walletAddress { font-size: 0.8rem; color: #aaa; text-align: center; margin-bottom: 20px; word-break: break-all; }
+    .switches-list { margin-top: 10px; }
+    .switch-item { background: #111; padding: 8px; border-radius: 6px; margin-top: 6px; font-size: 0.8rem; word-break: break-all; color: #00ffcc; }
+    label { font-size: 0.85rem; color: #aaa; margin-top: 10px; display: block; }
+  </style>
+</head>
+<body>
+
+<h1>⚰️ Dead Man's Switch</h1>
+<div id="walletAddress">Not connected</div>
+
+<div class="grid">
+
+  <!-- OWNER PANEL -->
+  <div class="panel">
+    <h2>👤 Owner Panel</h2>
+    <button id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+
+    <div style="margin-top:15px;">
+      <p>Status: <span id="statusBadge" class="status">--</span></p>
+      <div class="timer" id="countdown">--</div>
+      <p class="info">Time until next check-in required</p>
+    </div>
+
+    <button onclick="checkIn()">✅ Check In</button>
+
+    <label>Deposit ETH</label>
+    <input id="depositAmount" type="number" placeholder="Amount in ETH e.g. 0.01" step="0.001"/>
+    <button onclick="depositETH()">💰 Deposit ETH</button>
+
+    <label>Add Beneficiary</label>
+    <input id="benWallet" placeholder="Wallet address 0x..."/>
+    <input id="benShare" type="number" placeholder="Share % e.g. 100"/>
+    <button onclick="addBeneficiary()">➕ Add Beneficiary</button>
+
+    <label>Remove Beneficiary</label>
+    <input id="removeBenWallet" placeholder="Wallet address 0x..."/>
+    <button onclick="removeBeneficiary()">➖ Remove Beneficiary</button>
+
+    <button onclick="cancelSwitch()" style="background:#ff4444; color:white; margin-top:20px;">
+      🚫 Cancel & Withdraw
+    </button>
+  </div>
+
+  <!-- BENEFICIARY PANEL -->
+  <div class="panel">
+    <h2>🎯 Beneficiary Panel</h2>
+    <label>Contract Address to look up</label>
+    <input id="lookupAddress" placeholder="0x... DeadMansSwitch address"/>
+    <button onclick="lookupContract()">🔍 Look Up</button>
+
+    <div id="beneficiaryInfo" style="margin-top:15px; display:none;">
+      <p>Status: <span id="benStatusBadge" class="status">--</span></p>
+      <p class="info" id="benTimeLeft">Time remaining: --</p>
+      <p class="info" id="benShareInfo">Your share: --</p>
+      <button id="claimBtn" onclick="claimFunds()" disabled>💸 Claim Funds</button>
+    </div>
+
+    <div style="margin-top:20px;">
+      <button onclick="triggerGrace()">⚡ Trigger Grace Period</button>
+      <p class="info">Anyone can call this if owner missed check-in</p>
+    </div>
+  </div>
+
+  <!-- FACTORY PANEL -->
+  <div class="panel">
+    <h2>🏭 Factory Panel</h2>
+    <label>Check-In Interval (seconds)</label>
+    <input id="factoryInterval" type="number" placeholder="e.g. 3600 for 1 hour"/>
+    <label>Grace Period (seconds)</label>
+    <input id="factoryGrace" type="number" placeholder="e.g. 1800 for 30 min"/>
+    <button onclick="deploySwitch()">🚀 Deploy New Switch</button>
+
+    <div style="margin-top:20px;">
+      <button onclick="loadMySwitches()">📋 Load My Switches</button>
+      <div id="switchesList" class="switches-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ── Contract Addresses ──
+  const DMS_ADDRESS = "0x7FD7Ccb46321481F0Edf04fDdb5a3bE8A3FA7051";
+  const FACTORY_ADDRESS = "0xD66C65F6f40F0dd7620A52d39d2542E814947C9A";
+
+  // ── ABIs ──
+  const DMS_ABI = [
+    "function owner() view returns (address)",
+    "function status() view returns (uint8)",
+    "function lastCheckIn() view returns (uint256)",
+    "function checkInInterval() view returns (uint256)",
+    "function gracePeriod() view returns (uint256)",
+    "function beneficiaries(uint256) view returns (address wallet, uint256 sharePercent)",
+    "function checkIn() external",
+    "function deposit() external payable",
+    "function addBeneficiary(address wallet, uint256 share) external",
+    "function removeBeneficiary(address wallet) external",
+    "function triggerGracePeriod() external",
+    "function claim() external",
+    "function cancel() external"
+  ];
+
+  const FACTORY_ABI = [
+    "function createSwitch(uint256 checkInInterval, uint256 gracePeriod) external returns (address)",
+    "function getSwitchesByOwner(address owner) external view returns (address[])"
+  ];
+
+  // ── State ──
+  let provider, signer, dmsContract, factoryContract, userAddress;
+  let countdownInterval;
+
+  const statusNames = ["Active", "GracePeriod", "Triggered", "Cancelled"];
+
+  // ── Connect Wallet ──
+  async function connectWallet() {
+    try {
+      if (!window.ethereum) { alert("MetaMask not found!"); return; }
+      provider = new ethers.BrowserProvider(window.ethereum);
+      signer = await provider.getSigner();
+      userAddress = await signer.getAddress();
+
+      document.getElementById("walletAddress").innerText = "Connected: " + userAddress;
+      document.getElementById("connectBtn").innerText = "✅ Connected";
+      document.getElementById("connectBtn").disabled = true;
+
+      dmsContract = new ethers.Contract(DMS_ADDRESS, DMS_ABI, signer);
+      factoryContract = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
+
+      await refreshStatus();
+      startCountdown();
+    } catch (e) {
+      alert("Connection failed: " + e.message);
+    }
+  }
+
+  // ── Refresh Status ──
+  async function refreshStatus() {
+    try {
+      const status = await dmsContract.status();
+      const lastCheckIn = await dmsContract.lastCheckIn();
+      const interval = await dmsContract.checkInInterval();
+
+      const statusName = statusNames[Number(status)];
+      const badge = document.getElementById("statusBadge");
+      badge.innerText = statusName;
+      badge.className = "status " + statusName;
+
+      const deadline = Number(lastCheckIn) + Number(interval);
+      const now = Math.floor(Date.now() / 1000);
+      const remaining = deadline - now;
+
+      updateCountdown(remaining);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // ── Countdown Timer ──
+  function startCountdown() {
+    if (countdownInterval) clearInterval(countdownInterval);
+    countdownInterval = setInterval(refreshStatus, 10000);
+  }
+
+  function updateCountdown(seconds) {
+    const el = document.getElementById("countdown");
+    if (seconds <= 0) {
+      el.innerText = "⚠️ OVERDUE!";
+      el.style.color = "#ff4444";
+    } else {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      el.innerText = `${h}h ${m}m ${s}s`;
+      el.style.color = "#ffaa00";
+    }
+  }
+
+  // ── Check In ──
+  async function checkIn() {
+    try {
+      const tx = await dmsContract.checkIn();
+      await tx.wait();
+      alert("✅ Checked in successfully!");
+      await refreshStatus();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Deposit ETH ──
+  async function depositETH() {
+    try {
+      const amount = document.getElementById("depositAmount").value;
+      if (!amount) { alert("Enter an amount"); return; }
+      const tx = await dmsContract.deposit({ value: ethers.parseEther(amount) });
+      await tx.wait();
+      alert("✅ Deposited " + amount + " ETH!");
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Add Beneficiary ──
+  async function addBeneficiary() {
+    try {
+      const wallet = document.getElementById("benWallet").value;
+      const share = document.getElementById("benShare").value;
+      if (!wallet || !share) { alert("Fill in both fields"); return; }
+      const tx = await dmsContract.addBeneficiary(wallet, share);
+      await tx.wait();
+      alert("✅ Beneficiary added!");
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Remove Beneficiary ──
+  async function removeBeneficiary() {
+    try {
+      const wallet = document.getElementById("removeBenWallet").value;
+      if (!wallet) { alert("Enter wallet address"); return; }
+      const tx = await dmsContract.removeBeneficiary(wallet);
+      await tx.wait();
+      alert("✅ Beneficiary removed!");
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Cancel Switch ──
+  async function cancelSwitch() {
+    if (!confirm("Are you sure? This will withdraw all ETH and cancel the switch.")) return;
+    try {
+      const tx = await dmsContract.cancel();
+      await tx.wait();
+      alert("✅ Switch cancelled and ETH withdrawn!");
+      await refreshStatus();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Trigger Grace Period ──
+  async function triggerGrace() {
+    try {
+      const tx = await dmsContract.triggerGracePeriod();
+      await tx.wait();
+      alert("⚡ Grace period triggered!");
+      await refreshStatus();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Lookup Contract (Beneficiary) ──
+  async function lookupContract() {
+    try {
+      const addr = document.getElementById("lookupAddress").value;
+      if (!addr) { alert("Enter contract address"); return; }
+      const contract = new ethers.Contract(addr, DMS_ABI, signer);
+      const status = await contract.status();
+      const statusName = statusNames[Number(status)];
+
+      const badge = document.getElementById("benStatusBadge");
+      badge.innerText = statusName;
+      badge.className = "status " + statusName;
+
+      document.getElementById("beneficiaryInfo").style.display = "block";
+
+      const claimBtn = document.getElementById("claimBtn");
+      claimBtn.disabled = statusName !== "GracePeriod";
+
+      claimBtn.onclick = async () => {
+        try {
+          const tx = await contract.claim();
+          await tx.wait();
+          alert("💸 Claimed successfully!");
+        } catch (e) {
+          alert("Error: " + e.message);
+        }
+      };
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Claim Funds ──
+  async function claimFunds() {
+    try {
+      const tx = await dmsContract.claim();
+      await tx.wait();
+      alert("💸 Claimed successfully!");
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Deploy New Switch (Factory) ──
+  async function deploySwitch() {
+    try {
+      const interval = document.getElementById("factoryInterval").value;
+      const grace = document.getElementById("factoryGrace").value;
+      if (!interval || !grace) { alert("Fill in both fields"); return; }
+      const tx = await factoryContract.createSwitch(interval, grace);
+      const receipt = await tx.wait();
+      alert("🚀 New switch deployed! Check your switches list.");
+      await loadMySwitches();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  // ── Load My Switches ──
+  async function loadMySwitches() {
+    try {
+      const switches = await factoryContract.getSwitchesByOwner(userAddress);
+      const list = document.getElementById("switchesList");
+      list.innerHTML = "";
+      if (switches.length === 0) {
+        list.innerHTML = "<p class='info'>No switches found.</p>";
+        return;
+      }
+      switches.forEach(addr => {
+        const div = document.createElement("div");
+        div.className = "switch-item";
+        div.innerText = addr;
+        list.appendChild(div);
+      });
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+</script>
+</body>
+</html>
