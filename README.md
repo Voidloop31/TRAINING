@@ -1,66 +1,32 @@
-## Foundry
+# Dead Man's Switch
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+A blockchain-based dead man's switch smart contract built with Solidity and Foundry.
 
-Foundry consists of:
+## What it does
+Owner must check in every hour. If they miss a check-in,
+anyone can trigger the grace period. After 30 minutes,
+beneficiaries can claim the funds automatically — no lawyers, no banks.
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+## Contract Addresses (Sepolia Testnet)
+- **DeadMansSwitch:** 0x7FD7Ccb46321481F0Edf04fDdb5a3bE8A3FA7051
+- **SwitchFactory:** 0xD66C65F6f40F0dd7620A52d39d2542E814947C9A
 
-## Documentation
+## Project Structure
+- `src/DeadMansSwitch.sol` — core contract + factory
+- `test/DeadMansSwitch.t.sol` — Foundry unit tests
+- `frontend/index.html` — web frontend using ethers.js
 
-https://book.getfoundry.sh/
+## How to run tests
+forge test -vv
 
-## Usage
+## Test Coverage
+- Lines: 87.23%
+- Statements: 84.44%
+- Functions: 88.89%
 
-### Build
+## Frontend
+Open frontend/index.html in a browser with MetaMask installed.
 
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+## Resources
+- Foundry: https://getfoundry.sh
+- Sepolia Etherscan: https://sepolia.etherscan.io
