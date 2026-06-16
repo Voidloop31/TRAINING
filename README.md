@@ -19,6 +19,7 @@ beneficiaries can claim the funds automatically — no lawyers, no banks.
 ## How to run tests
 forge test -vv
 
+
 ## Test Coverage
 - Lines: 87.23%
 - Statements: 84.44%
